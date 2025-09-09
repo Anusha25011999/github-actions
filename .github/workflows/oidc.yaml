@@ -1,0 +1,35 @@
+name: OIDC Test
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        type: choice
+        options:
+          - qa
+          - prod
+        default: dev
+env:
+  Enviornment: ${{github.event.inputs.environment || 'dev'}}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: ${{env.Environment}}
+
+    steps:
+      - name: Printing Enviornment
+        run : echo "Enviornment is:${{env.Environment}}"
+      - name: Configure AWS credentials from OIDC
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{secrets.AWS_ROLE}}
+          aws-region: us-east-2
+      - name : To list S3
+        run: |
+              aws s3 ls
+    
+    

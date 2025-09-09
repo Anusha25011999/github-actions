@@ -12,7 +12,7 @@ on:
         options:
           - qa
           - prod
-        default: dev
+        
 env:
   Enviornment: ${{github.event.inputs.environment || 'dev'}}
 jobs:

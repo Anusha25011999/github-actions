@@ -1,4 +1,8 @@
 name: OIDC Test
+permissions:
+  id-token: write
+  contents: read
+
 on:
   push:
     branches:
@@ -12,7 +16,7 @@ on:
         options:
           - qa
           - prod
-        
+        default: qa
 jobs:
   build:
     runs-on: ubuntu-latest

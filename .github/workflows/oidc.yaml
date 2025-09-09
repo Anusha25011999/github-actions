@@ -25,7 +25,7 @@ jobs:
       Enviornment: ${{github.event.inputs.environment || 'dev'}}
     steps:
       - name: Printing Enviornment
-        run : echo "Enviornment is:${{env.Environment}}"
+        run : echo "Enviornment is:$Environment"
       - name: Configure AWS credentials from OIDC
         uses: aws-actions/configure-aws-credentials@v3
         with:

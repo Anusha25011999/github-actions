@@ -13,13 +13,12 @@ on:
           - qa
           - prod
         
-env:
-  Enviornment: ${{github.event.inputs.environment || 'dev'}}
 jobs:
   build:
     runs-on: ubuntu-latest
-    environment: ${{env.Environment}}
-
+    environment: ${{github.event.inputs.environment || 'dev'}}
+    env:
+      Enviornment: ${{github.event.inputs.environment || 'dev'}}
     steps:
       - name: Printing Enviornment
         run : echo "Enviornment is:${{env.Environment}}"

@@ -2,7 +2,7 @@ name: OIDC Test
 on:
   push:
     branches:
-      - main
+      - dev
   workflow_dispatch:
     inputs:
       environment:

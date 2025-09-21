@@ -1,0 +1,118 @@
+name: Build CD(Deploy to EC2)
+on:
+  # push:
+  #   branches: [dev, develop, qa, staging, main, master]
+  #   paths-ignore: [docs/**, README.md, LICENSE, .github/**, versions.json]
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Select environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - qa
+          - stage
+          #- prod
+      image_tag:
+        description: 'Docker image tag to deploy (leave blank for latest)'
+        required: false
+        default: ''
+
+jobs:
+  build-matrix:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }} 
+    permissions:
+      id-token: write
+      contents: read 
+    steps:
+      - name: Build Matrix from selected Environment.
+        id: set-matrix
+        run: |
+          if [[ "${{ github.event.inputs.environment }}" == "prod" ]]; then
+            ECR_REPOSITORY=${{ secrets.AWS_ECR_REPOSITORY_PROD }}
+            EC2_HOSTS=${{ secrets.EC2_HOST_PROD }}
+            EC2_USER=${{ secrets.EC2_USER_PROD }}
+            EC2_SSH_KEY=${{ secrets.EC2_SSH_KEY_PROD }}
+            EC2_PASSWORD=${{ secrets.EC2_PASSWORD_PROD }}
+          elif [[ "${{ github.event.inputs.environment }}" == "stage" ]]; then
+            ECR_REPOSITORY=${{ secrets.AWS_ECR_REPOSITORY_STAGE }}
+            EC2_HOSTS=${{ secrets.EC2_HOST_STAGE }}
+            EC2_USER=${{ secrets.EC2_USER_STAGE }}
+            EC2_SSH_KEY=${{ secrets.EC2_SSH_KEY_STAGE }}
+            EC2_PASSWORD=${{ secrets.EC2_PASSWORD_STAGE }}
+          elif [[ "${{ github.event.inputs.environment }}" == "qa" ]]; then
+            ECR_REPOSITORY=${{ secrets.AWS_ECR_REPOSITORY_QA }}
+            EC2_HOSTS=${{ secrets.EC2_HOST_QA }}
+            EC2_USER=${{ secrets.EC2_USER_QA }}
+            EC2_SSH_KEY=${{ secrets.EC2_SSH_KEY_QA }}
+            EC2_PASSWORD=${{ secrets.EC2_PASSWORD_QA }}
+          elif [[ "${{ github.event.inputs.environment }}" == "dev" ]]; then
+            ECR_REPOSITORY=${{ secrets.AWS_ECR_REPOSITORY_DEV }}
+            EC2_HOSTS=${{ secrets.EC2_HOST_DEV }}
+            EC2_USER=${{ secrets.EC2_USER_DEV }}
+            EC2_SSH_KEY=${{ secrets.EC2_SSH_KEY_DEV }}
+            EC2_PASSWORD=${{ secrets.EC2_PASSWORD_DEV }}
+          else
+            echo "Deployment aborted."
+            exit 1
+          fi
+
+          MATRIX=$(echo "$EC2_HOSTS" | jq -R \
+          --arg user "$EC2_USER" \
+          --arg key "$EC2_SSH_KEY" \
+          --arg password "$EC2_PASSWORD" \
+          --arg ecr "$ECR_REPOSITORY" \
+          'split(",") | map({EC2_HOST: ., EC2_USER: $user, EC2_SSH_KEY: $key, EC2_PASSWORD: $password, ECR_REPOSITORY: $ecr})')
+
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+    outputs:
+        matrix: ${{ steps.set-matrix.outputs.matrix }}
+
+  deploy:
+    needs: build-matrix
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.build-matrix.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      # Deploy to EC2 instance
+      - name: Deploy to EC2-${{ matrix.EC2_HOST }} via SSH
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ matrix.EC2_HOST }}
+          username: ${{ matrix.EC2_USER }}
+          #key: ${{ matrix.EC2_SSH_KEY }}
+          password: ${{ matrix.EC2_PASSWORD }}
+          script: |
+            echo "Deploying to ${{ matrix.EC2_HOST }}"
+            AWS_REGION="${{ vars.AWS_REGION }}"
+            REPOSITORY_NAME="${{ matrix.ECR_REPOSITORY }}" # <-- Change to your ECR repo name
+
+            # Login to ECR
+            aws ecr get-login-password --region $AWS_REGION | \
+              docker login --username AWS --password-stdin $REPOSITORY_NAME
+            
+            # Determine which tag to use
+            TAG_INPUT="${{ github.event.inputs.image_tag }}"
+            if [ -z "$TAG_INPUT" ]; then
+              echo "No tag provided, finding most recent image..."
+              IMAGE_TAG=$(aws ecr describe-images \
+                --repository-name $REPOSITORY_NAME \
+                --region $AWS_REGION \
+                --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' \
+                --output text)
+              echo "Using latest image tag: $IMAGE_TAG"
+            else
+              IMAGE_TAG="$TAG_INPUT"
+              echo "Using provided tag: $IMAGE_TAG"
+            fi
+            docker pull ${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
+            # Stop and remove existing container if it exists
+            docker stop react-app || true
+            docker rm react-app || true
+            # Run the new container
+            docker run -d --name react-app -p 80:80 ${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
